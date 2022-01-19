@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 import re
 import datetime
+import pickle
 
 load_dotenv()
 
@@ -469,7 +470,7 @@ def notion_command(file_json, notion_headers, org, repo, issue_number):
                 },
                 {
                     "property" : "Github Issue Number",
-                    "number" : {
+                    "number" : {    
                         "equals" : issue_number
                     }
                 }
@@ -524,7 +525,7 @@ def patch_github_issue(notion_command, github_headers):
         f.write(json.dumps(notion_command_instructions))
         
     # ... and delete the notion_command
-    notion_command.unlink()
+    notion_command.rename(f"cache/notion_commands/old/{notion_command.stem}.json")
         
 
 def github_command(file_json, github_headers, org, repo, issue_number):
@@ -578,7 +579,7 @@ def patch_notion_database(github_command, notion_headers):
         f.write(json.dumps(github_command_instructions))
         
     # ... and delete the github_command
-    github_command.unlink()
+    github_command.rename(f"cache/github_commands/old/{github_command.stem}.json")
     
 # Create your views here.
 if __name__ == "__main__":
@@ -588,48 +589,57 @@ if __name__ == "__main__":
     # Get all cache files
     cache = Path("cache")
     
-    now_minus_twenty = datetime.datetime.now() + datetime.timedelta(minutes=-20)
+    # Save time to file so that we can do it from the last time it was done
+    if (cache / 'time_last_run.pickle').is_file():
+        print("found time file; reading...")
+        with open(cache / 'time_last_run.pickle', 'rb') as f:
+            now_minus_twenty = pickle.load(f)
+    else:
+        print("didn't find time file")
+        now_minus_twenty = datetime.datetime.now() + datetime.timedelta(minutes=-20)
+        with open(cache / 'time_last_run.pickle', 'wb') as f:   
+            pickle.dump(now_minus_twenty, f)
     
-    while True:
-        print(f"Check issues since {now_minus_twenty}")
-        # check for any new issues created since NOW (using ISO 8601 format)
-        # upload_all_issues(cache=True, since = now_minus_twenty)
+    # while True:
+    print(f"Check issues since {now_minus_twenty}")
+    # check for any new issues created since NOW (using ISO 8601 format)
+    upload_all_issues(cache=True, since = now_minus_twenty)
+    
+    # # get glob of master json files
+    for path in cache.glob("*.json"):
+        print(f"Checking cache: {path.stem}")
         
-        # # get glob of master json files
-        for path in cache.glob("*.json"):
-            print(f"Checking cache: {path.stem}")
-            
-            # get pertinent information from command
-            match = re.match(r"(amichuda|all-but-dissertation|minimod-nutrition|cornell-cdses|uganda-rideshare-projects|staaars-plus)_(.*)_([0-9]+)", path.stem)
-            org = match[1]
-            repo  = match[2]
-            issue_number = match[3]
-            
-            # read file in cache
-            with open(path, 'rb') as f:
-                file = f.read()
-            
-            file_json = json.loads(file.decode('utf-8'))
-            
-            # Check for changes in github to be patched to notion
-            github_command(file_json, github.headers, org, repo, int(issue_number))
-            
-            # check for change in notion to be patched to github
-            notion_command(file_json, notion.headers, org, repo, int(issue_number))
-            
-        # Get glob of notion commands
-        notion_commands = Path("cache/notion_commands/").glob("*.json")
+        # get pertinent information from command
+        match = re.match(r"(amichuda|all-but-dissertation|minimod-nutrition|cornell-cdses|uganda-rideshare-projects|staaars-plus)_(.*)_([0-9]+)", path.stem)
+        org = match[1]
+        repo  = match[2]
+        issue_number = match[3]
+        
+        # read file in cache
+        with open(path, 'rb') as f:
+            file = f.read()
+        
+        file_json = json.loads(file.decode('utf-8'))
+        
+        # Check for changes in github to be patched to notion
+        github_command(file_json, github.headers, org, repo, int(issue_number))
+        
+        # check for change in notion to be patched to github
+        notion_command(file_json, notion.headers, org, repo, int(issue_number))
+        
+    # Get glob of notion commands
+    notion_commands = Path("cache/notion_commands/").glob("*.json")
 
-        print("Beginning to implement commands...")
-        for command in notion_commands:
-            print(f"patching github issue with {command.stem}")
-                
-            patch_github_issue(command, github.headers)           
-        
-        # Get glob of github commands
-        github_commands = Path("cache/github_commands/").glob("*.json")
-        
-        for command in github_commands:
-            print(f"patching notion database with {command.stem}")
+    print("Beginning to implement commands...")
+    for command in notion_commands:
+        print(f"patching github issue with {command.stem}")
             
-            patch_notion_database(command, notion.headers)
+        patch_github_issue(command, github.headers)           
+    
+    # Get glob of github commands
+    github_commands = Path("cache/github_commands/").glob("*.json")
+    
+    for command in github_commands:
+        print(f"patching notion database with {command.stem}")
+        
+        patch_notion_database(command, notion.headers)
